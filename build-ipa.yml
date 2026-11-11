@@ -1,0 +1,60 @@
+name: Build iPhone app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/house-capture
+    steps:
+      - name: Download source
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build Release for a physical iPhone
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project HouseCapture.xcodeproj \
+            -scheme HouseCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+
+      - name: Package unsigned IPA for AltStore Classic
+        run: |
+          set -euo pipefail
+          mkdir -p package/Payload
+          ditto build/Build/Products/Release-iphoneos/HouseCapture.app package/Payload/HouseCapture.app
+          test -f package/Payload/HouseCapture.app/Info.plist
+          cd package
+          /usr/bin/zip -qry ../3D-Model-Anything-unsigned.ipa Payload
+
+      - name: Save iPhone installation file
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3D-Model-Anything-iPhone
+          path: apps/house-capture/3D-Model-Anything-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
