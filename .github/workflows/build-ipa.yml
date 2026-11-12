@@ -1,0 +1,59 @@
+name: Build iPhone app (.ipa)
+
+# Start handmatig: tabblad Actions → "Build iPhone app (.ipa)" → Run workflow
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nieuwste Xcode kiezen
+        run: |
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Gebruik $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          ls -d /Applications/Xcode*.app
+
+      - name: XcodeGen installeren
+        run: brew install xcodegen
+
+      - name: Xcode-project genereren
+        working-directory: apps/house-capture
+        run: xcodegen generate
+
+      - name: App bouwen (zonder ondertekening)
+        working-directory: apps/house-capture
+        run: |
+          xcodebuild -project HouseCapture.xcodeproj \
+            -scheme HouseCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log || { echo "---- Laatste regels ----"; tail -40 build.log; exit 1; }
+
+      - name: .ipa maken
+        working-directory: apps/house-capture
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/HouseCapture.app Payload/
+          zip -qry HouseCapture.ipa Payload
+          ls -lh HouseCapture.ipa
+
+      - name: .ipa uploaden
+        uses: actions/upload-artifact@v4
+        with:
+          name: HouseCapture-ipa
+          path: apps/house-capture/HouseCapture.ipa
+          retention-days: 30
