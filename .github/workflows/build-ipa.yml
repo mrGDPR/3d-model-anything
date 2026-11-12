@@ -1,6 +1,5 @@
-name: Build iPhone app (.ipa)
+name: Build iPhone app
 
-# Start handmatig: tabblad Actions → "Build iPhone app (.ipa)" → Run workflow
 on:
   workflow_dispatch:
 
@@ -10,28 +9,29 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Nieuwste Xcode kiezen
-        run: |
-          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          echo "Gebruik $XCODE"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
-          xcodebuild -version
-          ls -d /Applications/Xcode*.app
-
-      - name: XcodeGen installeren
-        run: brew install xcodegen
-
-      - name: Xcode-project genereren
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
         working-directory: apps/house-capture
+    steps:
+      - name: Download source
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: App bouwen (zonder ondertekening)
-        working-directory: apps/house-capture
+      - name: Build Release for a physical iPhone
         run: |
-          xcodebuild -project HouseCapture.xcodeproj \
+          set -euo pipefail
+          xcodebuild \
+            -project HouseCapture.xcodeproj \
             -scheme HouseCapture \
             -configuration Release \
             -sdk iphoneos \
@@ -39,21 +39,22 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
-          grep -q "BUILD SUCCEEDED" build.log || { echo "---- Laatste regels ----"; tail -40 build.log; exit 1; }
+            CODE_SIGN_IDENTITY='' \
+            build
 
-      - name: .ipa maken
-        working-directory: apps/house-capture
+      - name: Package unsigned IPA for AltStore Classic
         run: |
-          mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/HouseCapture.app Payload/
-          zip -qry HouseCapture.ipa Payload
-          ls -lh HouseCapture.ipa
+          set -euo pipefail
+          mkdir -p package/Payload
+          ditto build/Build/Products/Release-iphoneos/HouseCapture.app package/Payload/HouseCapture.app
+          test -f package/Payload/HouseCapture.app/Info.plist
+          cd package
+          /usr/bin/zip -qry ../3D-Model-Anything-unsigned.ipa Payload
 
-      - name: .ipa uploaden
+      - name: Save iPhone installation file
         uses: actions/upload-artifact@v4
         with:
-          name: HouseCapture-ipa
-          path: apps/house-capture/HouseCapture.ipa
-          retention-days: 30
+          name: 3D-Model-Anything-iPhone
+          path: apps/house-capture/3D-Model-Anything-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
